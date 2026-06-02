@@ -4,7 +4,6 @@ import glob
 import math
 import numpy as np
 import argparse
-
 def GetDarkChannel(im, wsz):
     b, g, r = cv2.split(im)
     dc = cv2.min(cv2.min(r, g), b)
@@ -19,9 +18,7 @@ def AtmLight(im, dark):
     darkvec = dark.reshape(imsz)
     imvec = im.reshape(imsz, 3)
 
-    indices = darkvec.argsort()
-    indices = indices[imsz-numpx::]
-
+    indices = darkvec.argsort()[imsz-numpx::]
     A = np.mean(imvec[indices], axis=0, keepdims=True)
     return A
 
@@ -56,7 +53,6 @@ def TransmissionRefine(q, et):
     return t
 
 def Recover(im, t, A, t0 = 0.1):
-    res = np.empty(im.shape,im.dtype)
     t = cv2.max(t, t0)
 
     res = (im - A)/t[:,:, np.newaxis] + A
