@@ -1,101 +1,109 @@
-import cv2;
-import math;
-import numpy as np;
+import os
+import cv2
+import glob
+import math
+import numpy as np
+import argparse
 
-def DarkChannel(im,sz):
-    b,g,r = cv2.split(im)
-    dc = cv2.min(cv2.min(r,g),b);
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(sz,sz))
-    dark = cv2.erode(dc,kernel)
+def GetDarkChannel(im, wsz):
+    b, g, r = cv2.split(im)
+    dc = cv2.min(cv2.min(r, g), b)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (wsz, wsz))
+    dark = cv2.erode(dc, kernel)
     return dark
 
-def AtmLight(im,dark):
-    [h,w] = im.shape[:2]
+def AtmLight(im, dark):
+    [h, w] = im.shape[:2]
     imsz = h*w
-    numpx = int(max(math.floor(imsz/1000),1))
-    darkvec = dark.reshape(imsz);
-    imvec = im.reshape(imsz,3);
+    numpx = int(max(math.floor(imsz/1000), 1))
+    darkvec = dark.reshape(imsz)
+    imvec = im.reshape(imsz, 3)
 
-    indices = darkvec.argsort();
+    indices = darkvec.argsort()
     indices = indices[imsz-numpx::]
 
-    atmsum = np.zeros([1,3])
-    for ind in range(1,numpx):
-       atmsum = atmsum + imvec[indices[ind]]
-
-    A = atmsum / numpx;
+    A = np.mean(imvec[indices], axis=0, keepdims=True)
     return A
 
-def TransmissionEstimate(im,A,sz):
-    omega = 0.95;
-    im3 = np.empty(im.shape,im.dtype);
-
-    for ind in range(0,3):
-        im3[:,:,ind] = im[:,:,ind]/A[0,ind]
-
-    transmission = 1 - omega*DarkChannel(im3,sz);
+def TransmissionEstimate(im, A, wsz, omega):
+    normI = im / A
+    transmission = 1 - omega*GetDarkChannel(normI, wsz)
     return transmission
 
-def Guidedfilter(im,p,r,eps):
-    mean_I = cv2.boxFilter(im,cv2.CV_64F,(r,r));
-    mean_p = cv2.boxFilter(p, cv2.CV_64F,(r,r));
-    mean_Ip = cv2.boxFilter(im*p,cv2.CV_64F,(r,r));
-    cov_Ip = mean_Ip - mean_I*mean_p;
+def Guidedfilter(im, p, r, eps):
+    mean_I = cv2.boxFilter(im, cv2.CV_64F,(r,r))
+    mean_p = cv2.boxFilter(p, cv2.CV_64F,(r,r))
+    mean_Ip = cv2.boxFilter(im*p,cv2.CV_64F,(r,r))
+    cov_Ip = mean_Ip - mean_I*mean_p
 
-    mean_II = cv2.boxFilter(im*im,cv2.CV_64F,(r,r));
-    var_I   = mean_II - mean_I*mean_I;
+    mean_II = cv2.boxFilter(im*im,cv2.CV_64F,(r,r))
+    var_I   = mean_II - mean_I*mean_I
 
-    a = cov_Ip/(var_I + eps);
-    b = mean_p - a*mean_I;
+    a = cov_Ip/(var_I + eps)
+    b = mean_p - a*mean_I
 
-    mean_a = cv2.boxFilter(a,cv2.CV_64F,(r,r));
-    mean_b = cv2.boxFilter(b,cv2.CV_64F,(r,r));
+    mean_a = cv2.boxFilter(a,cv2.CV_64F,(r,r))
+    mean_b = cv2.boxFilter(b,cv2.CV_64F,(r,r))
 
-    q = mean_a*im + mean_b;
-    return q;
+    q = mean_a*im + mean_b
+    return q
 
-def TransmissionRefine(im,et):
-    gray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY);
-    gray = np.float64(gray)/255;
-    r = 60;
-    eps = 0.0001;
-    t = Guidedfilter(gray,et,r,eps);
+def TransmissionRefine(q, et):
+    r = 80
+    eps = 0.0004
+    t = Guidedfilter(q, et, r, eps)
 
-    return t;
+    return t
 
-def Recover(im,t,A,tx = 0.1):
-    res = np.empty(im.shape,im.dtype);
-    t = cv2.max(t,tx);
+def Recover(im, t, A, t0 = 0.1):
+    res = np.empty(im.shape,im.dtype)
+    t = cv2.max(t, t0)
 
-    for ind in range(0,3):
-        res[:,:,ind] = (im[:,:,ind]-A[0,ind])/t + A[0,ind]
-
+    res = (im - A)/t[:,:, np.newaxis] + A
+    res = res.clip(0., 1.)
     return res
 
-if __name__ == '__main__':
-    import sys
-    try:
-        fn = sys.argv[1]
-    except:
-        fn = './image/15.png'
-
-    def nothing(*argv):
-        pass
-
-    src = cv2.imread(fn);
-
-    I = src.astype('float64')/255;
+def Dehaze(input, wsz = 15, t0 = 0.3, omega = 0.95):
+    I = input / 255.
+    q = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY) / 255.
  
-    dark = DarkChannel(I,15);
-    A = AtmLight(I,dark);
-    te = TransmissionEstimate(I,A,15);
-    t = TransmissionRefine(src,te);
-    J = Recover(I,t,A,0.1);
+    dark = GetDarkChannel(I, wsz)
+    A = AtmLight(I, dark)
+    te = TransmissionEstimate(I, A, wsz, omega)
+    tr = TransmissionRefine(q, te) 
+    J = Recover(I, tr, A, t0)
+    output = (J * 255).astype(np.uint8)
+    return output
 
-    cv2.imshow("dark",dark);
-    cv2.imshow("t",t);
-    cv2.imshow('I',src);
-    cv2.imshow('J',J);
-    cv2.imwrite("./image/J.png",J*255);
-    cv2.waitKey();
-    
+def main():
+    parser = argparse.ArgumentParser(description='Haze Removal')
+    parser.add_argument('--input', default="input", type=str, help='Path to the input image')
+    parser.add_argument('--output', default="output", type=str, help='Path to save the output image')
+    parser.add_argument("--ext", type=str, default='auto', help="Image extension. Options: auto | jpg | png, auto means using the same extension as inputs. Default: auto")
+
+    args = parser.parse_args()
+    if args.input.endswith('/'):
+        args.input = args.input[:-1]
+        
+    if os.path.isfile(args.input):
+        img_list = [args.input]
+    else:
+        img_list = sorted(glob.glob(os.path.join(args.input, '*.[jpJP][pnPN]*[gG]')))
+
+    os.makedirs(args.output, exist_ok=True)
+
+    for img_path in img_list:
+        img_name = os.path.basename(img_path)
+        print(f'Processing {img_name} ...')
+        basename, ext = os.path.splitext(img_name)
+        input_img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        output_img = Dehaze(input_img)
+
+        if args.ext == 'auto':
+            extension = ext[1:]
+        else:
+            extension = args.ext
+        cv2.imwrite(os.path.join(args.output, f'{basename}_hazeremoval.{extension}'), output_img)
+
+if __name__ == "__main__":
+    main()
