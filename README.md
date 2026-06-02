@@ -1,6 +1,6 @@
 # single image dehaze
 ## Introduction
-This program implement single image dehazing using dark channel prior. 
+This program implement single image dehazing using dark channel prior and guided image filtering. 
 
 ## Compile Dependencies
 - OpenCV
