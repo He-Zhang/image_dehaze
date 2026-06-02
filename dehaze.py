@@ -4,6 +4,7 @@ import glob
 import math
 import numpy as np
 import argparse
+
 def GetDarkChannel(im, wsz):
     b, g, r = cv2.split(im)
     dc = cv2.min(cv2.min(r, g), b)
