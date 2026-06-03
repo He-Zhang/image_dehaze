@@ -19,7 +19,7 @@ def AtmLight(im, dark):
     darkvec = dark.reshape(imsz)
     imvec = im.reshape(imsz, 3)
 
-    indices = darkvec.argsort()[imsz-numpx::]
+    indices = darkvec.argsort()[imsz-numpx:]
     A = np.mean(imvec[indices], axis=0, keepdims=True)
     return A
 
